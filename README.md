@@ -28,11 +28,17 @@ python3 test.py
 
 ## How to fork if you don't have access to TUBerlin Gitlab
 
-Create a repository in your personal Gitlab or Github and clone it to your computer
+Create an empty repository in your personal Gitlab or Github and clone it to your computer
 
 ```
 git clone YOURREPOSITORY
 cd YOURREPOSITORY
+```
+
+Make sure you are using the `main` branch (not `master`)
+
+```
+git checkout -b main
 ```
 
 Add our repository as remote of name upstream
