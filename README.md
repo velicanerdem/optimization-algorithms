@@ -41,10 +41,11 @@ Add our repository as remote of name upstream
 git remote add upstream https://git.tu-berlin.de/lis-public/oa-workspace.git
 ```
 
-Now you can fetch and pull from the upstream.
+Now you can fetch and pull from the upstream. Don't forget the submodule. 
 
 ```
 git pull upstream main
+git submodule update --init --recursive
 ```
 
 Push to your own Gitlab/Github repository:
