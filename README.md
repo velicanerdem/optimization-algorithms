@@ -25,3 +25,30 @@ python3 test.py
 ```
 
 * Tell us the URL of your fork so that we can also evaluate it.
+
+## How to fork if you don't have access to TUBerlin Gitlab
+
+Create a repository in your personal Gitlab or Github and clone it to your computer
+
+```
+git clone YOURREPOSITORY
+cd YOURREPOSITORY
+```
+
+Add our repository as remote of name upstream
+
+```
+git remote add upstream https://git.tu-berlin.de/lis-public/oa-workspace.git
+```
+
+Now you can fetch and pull from the upstream.
+
+```
+git pull upstream main
+```
+
+Push to your own Gitlab/Github repository:
+
+```
+git push origin main
+```
