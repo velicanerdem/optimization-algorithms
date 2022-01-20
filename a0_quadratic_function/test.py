@@ -49,6 +49,7 @@ class testProblem(unittest.TestCase):
 
         tol = 1e-4
         Hdiff = finite_diff_hess(f,x,tol) 
+
         flag = np.allclose( H , Hdiff, 10*tol, 10*tol)
         self.assertTrue(flag)
 

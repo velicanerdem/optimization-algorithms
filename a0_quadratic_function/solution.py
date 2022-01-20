@@ -12,7 +12,9 @@ class Problem0( MathematicalProgram ):
     def __init__(self,C):
 
         # in case you want to initialize some class members or so...
-
+        self._C = C
+        self._CC = C.T @ C
+        self._2CC = 2 * C.T @ C
 
     def evaluate(self, x) :
         """
@@ -20,13 +22,13 @@ class Problem0( MathematicalProgram ):
         ----
         MathematicalProgram.evaluate
         """
-
+        
         # add the main code here! E.g. define methods to compute value y and Jacobian J
-        # y = ...
-        # J = ...
-
+        y = x.T @ self._CC @ x
+        J = self._2CC @ x
+        
         # and return as a tuple of arrays, namely of dim (1) and (1,n)
-        #return  np.array( [ y ] ) ,  J.reshape(1,-1)
+        return  np.array( [ y ] ) ,  J.reshape(1,-1)
 
     def getDimension(self) : 
         """
@@ -45,10 +47,10 @@ class Problem0( MathematicalProgram ):
         """
         # add code to compute the Hessian matrix
 
-        # H = ...
+        H = self._2CC
 
         # and return it
-        #return H
+        return H
 
     def getInitializationSample(self) : 
         """
