@@ -1,0 +1,8 @@
+1) 
+	Rosenbrock: 
+		jacobian / jacobian_norm true divide error
+		Cost rises between 40-50 a lot
+2) 
+
+	NonLinearSoS:
+		
