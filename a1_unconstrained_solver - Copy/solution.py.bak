@@ -61,7 +61,7 @@ class SolverUnconstrained(NLPSolver):
         self._stop_value = 1e-12
         
         self._iteration_current = 0
-        self._iteration_total = 400        
+        self._iteration_total = 800        
         
         self._line_search_forward_pass = 1
         

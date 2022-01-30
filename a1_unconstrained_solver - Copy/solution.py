@@ -359,7 +359,7 @@ class SolverUnconstrained(NLPSolver):
                     solved, x_current, point_phi, point_J = self._line_search_normalized(x_current)
                 cost_current, gradient_current = self._cost_gradient_total(point_phi, point_J)
             
-        # show_data.cost_over_time(self.problem)
+        show_data.cost_over_time(self.problem)
         # show_data.gradient_over_time(self.problem)
         
         
