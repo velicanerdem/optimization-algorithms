@@ -6,130 +6,295 @@ sys.path.append("..")
 from optimization_algorithms.interface.nlp_solver import NLPSolver
 from optimization_algorithms.interface.objective_type import OT
 from utility import show_data 
+from optimization_algorithms.utils import finite_diff
 
 class SolverUnconstrained(NLPSolver):
 
+    class FeatureTypes:
+        def __init__(self, program):
+            self.x_shape = np.shape(program.getInitializationSample())
+        
+            types = program.getFeatureTypes()
+            print("Types: {}".format(types))
+            self.f_index = [i for i in range(len(types)) if types[i]==OT.f]
+            self.sos_index = [i for i in range(len(types)) if types[i]==OT.sos]
+            self.eq_index = [i for i in range(len(types)) if types[i]==OT.eq]
+            self.ineq_index = [i for i in range(len(types)) if types[i]==OT.ineq]
+            
+    class Method:
+        def __init__(self, method, name, alpha, iteration_amount):
+            self.method = method
+            self.name = name
+            self.alpha = alpha
+            self.iteration_amount = iteration_amount
+            
+            self.last_cost_change = 1
+            
+        def lower_alpha(self, lower_alpha_multiplier):
+            self.alpha *= lower_alpha_multiplier
+        
     def __init__(self, alpha=0.1):
         """
         See also:
         ----
         NLPSolver.__init__
         """
-        self._alpha = alpha
+        
+        self._gradient_descent_string = "Gradient Descent"
+        self._newtons_method_string = "Newton's Method"
+        self._line_search_string = "Line Search"
+        
+        self._method_list = list()
+        self._gradient_descent_method = self.Method(self._gradient_descent, self._gradient_descent_string, alpha, 10)
+        self._newtons_method_method = self.Method(self._newtons_method, self._newtons_method_string, alpha, 10)
+        self._line_search_method = self.Method(self._line_search_normalized, self._line_search_string, alpha, 1)
+        
+        self._method_list.append(self._gradient_descent_method)
+        self._method_list.append(self._newtons_method_method)
+        self._method_list.append(self._line_search_method)
+        
+        self._lower_alpha_multiplier = 0.9
+        self._try_amount = 10
         
         self._step_increase = 1.2
         self._stepsize_decrement = 0.5
-        self._minimum_desired_decrease = 0.01
-        self._maximum_cost = 1e-3
+        self._minimum_desired_decrease_multiplier = 0.01
+        self._stop_value = 1e-6
         
-        self._iteration_total = 10000
+        self._iteration_current = 0
+        self._iteration_total = 10000        
+        
+        self._line_search_forward_pass = 1
+        
+        self._method_multiplier = 0.25
+        
+        self._methods_list = list()
+        self._methods_list.append(self._gradient_descent_string)
+        self._methods_list.append(self._newtons_method_string )
+        self._methods_list.append(self._line_search_string)
+        
+        # Should have just made a class and checked independently maybe
+        # Maybe not
+        self._methods_tried = dict()
+        
+        for method in self._methods_list:
+            self._methods_tried[method] = False
+
+    def _assign_max_alpha(self):
+        self._alpha = max(self._alpha_gradient_descent, self._alpha_newtons_method, self._alpha_line_search)
+
+    # Correct with convex assumption
+    def _stop(self, max_last_change):
+        it_remaining = self._iteration_total - self._iteration_current
+        maximum_expected_change = max_last_change * it_remaining
+
+        if self._stop_value > maximum_expected_change:
+            return True
+        else:
+            return False
+
+    # I wonder if I can add more
+    def _reject_step(self, expected_cost_change, cost_diff):
+        if cost_diff <= 0:
+            return True
+        else:
+            return False
 
     # Utility functions
+    
+    def _evaluate(self, x):
+        # Wrapper
+        self._iteration_current += 1
+        return self.problem.evaluate(x)
 
-    def _evaluate_cost(self, x):
-        cost, _ = self.problem.evaluate(x)
+    def _hessian_wrapper_cost(self, x):
+        phi, _ = self._evaluate(x)
+        cost = self._cost_total(phi)
         
-        return cost[0]
-    
-    def _get_sos_cost(self, phi):
-        return np.dot(phi, phi)
-    
-    def _evaluate_cost_sos_total(self, x):
-        cost, _ = self.problem.evaluate(x)
-        cost = self._get_sos_cost(phi)
-
         return cost
 
-    def _evaluate_cost_jacobian(self, x):
-        cost, jacobian = self.problem.evaluate(x)
-    
-        return cost[0], jacobian[0]
-        
-    def _evaluate_cost_jacobian_sos(self, x):
-        cost, jacobian = self.problem.evaluate(x)
-        cost_summed = np.dot(cost, cost)
-        sos_gradient = jacobian.T @ cost
-    
-        return cost_summed, sos_gradient
+    # compatibility with sos hessian and vice versa
+    def _hessian(self, x, J):
+        return self.problem.getFHessian(x)
 
+    def _hessian_sos(self, x, J):
+        hessian_finite_diff = finite_diff.finite_diff_hess(self._hessian_wrapper_cost, x, 0.000001)
+        
+        return hessian_finite_diff
+        
+    def _hessian_sos_2(self, x, J):
+        return 2 * J.T @ J
+
+    def _cost_total(self, phi):
+        cost = 0
+        f_index = self._featureTypes.f_index
+        sos_index = self._featureTypes.sos_index
+        eq_index = self._featureTypes.eq_index
+        ineq_index = self._featureTypes.ineq_index
+        
+        if len(f_index) > 0:
+            cost += phi[f_index][0]
+        if len(sos_index) > 0:
+            cost += phi[sos_index].T @ phi[sos_index]
+        if len(eq_index) > 0:
+            cost += phi[eq_index][0]
+        if len(ineq_index) > 0:
+            cost += phi[ineq_index][0]
+        
+        return cost
+
+    def _gradient_total(self, phi, J):        
+        gradient = np.zeros(self._featureTypes.x_shape)
+        
+        f_index = self._featureTypes.f_index
+        sos_index = self._featureTypes.sos_index
+        eq_index = self._featureTypes.eq_index
+        ineq_index = self._featureTypes.ineq_index
+        
+        if len(f_index) > 0:
+            gradient += J[f_index][0]
+        if len(sos_index) > 0:
+            gradient += J[sos_index].T @ phi[sos_index]
+        if len(eq_index) > 0:
+            gradient += J[eq_index][0]
+        if len(ineq_index) > 0:
+            gradient += J[ineq_index][0]
+        
+        return gradient
+
+    def _cost_gradient_total(self, phi, J):        
+        cost = 0
+        gradient = np.zeros(self._featureTypes.x_shape)
+        
+        f_index = self._featureTypes.f_index
+        sos_index = self._featureTypes.sos_index
+        eq_index = self._featureTypes.eq_index
+        ineq_index = self._featureTypes.ineq_index
+        
+        if len(f_index) > 0:
+            cost += phi[f_index][0]
+            gradient += J[f_index][0]
+        if len(sos_index) > 0:
+            cost += phi[sos_index].T @ phi[sos_index]
+            gradient += J[sos_index].T @ phi[sos_index]
+        if len(eq_index) > 0:
+            cost += phi[eq_index][0]
+            gradient += J[eq_index][0]
+        if len(ineq_index) > 0:
+            cost += phi[ineq_index][0]
+            gradient += J[ineq_index][0]
+        
+        return cost, gradient
+    
     # Optimization functions
 
-    def _gradient_descent(self, x):
-        phi, J = self._evaluate_cost_jacobian(x)
+    def _gradient_descent(self, x, gradient):
+        descent = self._gradient_descent_method.alpha * gradient
         
-        return x - self._alpha * J, [phi, J]
+        delta = descent * gradient
+        expected_cost_change = np.sum(np.abs(delta))
         
-    def _sos_gradient(self, x):
-    
-        phi, J = self.problem.evaluate(x)
+        return x - descent, expected_cost_change
 
-        return x - 0.01 * J.T @ phi, [phi, J]
+    def _newtons_method(self, x, gradient, hessian):        
+        gradient_val = np.linalg.inv(hessian) @ gradient
+        descent = self._newtons_method_method.alpha * gradient_val
+        
+        delta = descent * gradient_val
+        expected_cost_change = np.sum(np.abs(delta))
+        
+        return x - descent, expected_cost_change
+        
 
-    def _newtons_method(self, x):
-        phi, J = self._evaluate_cost_jacobian(x)
+    # Normalized because it uses normalized jacobian for stepwise movement instead of unit.
+    # Only optimization function with evaluate inside, but nothing much to do about it
+    # Thus it returns phi / jacobian
+    # Doesn't work on SoS, loops.
+    def _line_search_normalized(self, x):
+        # self._alpha is normally 0.1 thus this will be 1
+        # Note: since this is used before gradient descent, maybe lower initial alpha?
+        # TODO: Multiplicate evaluate
+        solved = False
         
-        H = self.problem.getFHessian(x)
-        delta = np.linalg.inv(H) @ J
-        return x - delta, [phi, J, H]
-
-
-    def _line_search(self, x, evaluate_cost, evaluate_cost_jacobian):        
-        alpha = 1
-        
-        phi, jacobian = evaluate_cost_jacobian(x)
-        jacobian_norm = np.linalg.norm(jacobian)
-        
-        delta_max = pow(2, 32)
-        
-        for _ in range(10):
-            delta = - jacobian / jacobian_norm
-            next_val = x + alpha * delta
-            next_cost = evaluate_cost(next_val)
-            estimated_step_value = self._minimum_desired_decrease * alpha * np.dot(jacobian, delta)
-            desired_minimum_cost = phi + estimated_step_value
+        x_start = x
+        for _ in range(self._line_search_forward_pass):
+            phi, J = self._evaluate(x)
+            cost, jacobian = self._cost_gradient_total(phi, J)
             
-            while next_cost > desired_minimum_cost:
-                alpha *= self._stepsize_decrement
-                next_val = x + alpha * delta                
-                next_cost = evaluate_cost(next_val)
-                estimated_step_value = self._minimum_desired_decrease * alpha * np.dot(jacobian, delta)
-                desired_minimum_cost = phi + estimated_step_value
-            
-            x = x + alpha * np.dot(jacobian, delta)
-            delta = min(self._step_increase * alpha, delta_max)
-            
-            phi, jacobian = evaluate_cost_jacobian(x)
+            # For gradient search
             jacobian_norm = np.linalg.norm(jacobian)
-            
-        return x, [phi, jacobian]
+            # For x value update
+            if jacobian_norm == 0:
+                solved = True
+                return solved, x, [phi, jacobian] 
+            delta = -jacobian / jacobian_norm
 
-    def _try_solution(self, x_init, it_per_try, methods, methods_param_total, evaluate_cost, evaluate_cost_jacobian, is_sos):
-        x = x_init
-        x_before = x_init
-        try:
-            for _ in range(it_per_try):
-                for i in range(len(methods)):
-                    x_before = x
-                    method = methods[i]
-                    # Start with line search if possible
-                    if methods_param_total[i] == 3:
-                        x, phi_jacobian = method(x, evaluate_cost, evaluate_cost_jacobian)
-                    elif methods_param_total[i] == 1:
-                        x, phi_jacobian = method(x)
-                    else:
-                        raise Exception("Wrong number of arguments")
-                    if is_sos:
-                        cost = self._get_sos_cost(phi_jacobian[0])
-                        if cost < self._maximum_cost:
-                            return x, True
-                    else:
-                        if phi_jacobian[0] < self._maximum_cost:
-                            return x, True
-        except:
-            return x_before, False
-        finally:
-            return x, False
+            # I really don't know how to program function in the loop correct way
+            # Especially with constant values
+            # I will just do it before loop first
+
+            # Evaluate desired cost
+            desired_cost_decrease_multiplier = self._minimum_desired_decrease_multiplier * -jacobian_norm
+            desired_cost_decrease = self._line_search_method.alpha * desired_cost_decrease_multiplier
+            desired_cost = cost + desired_cost_decrease
+
+            # Evaluate point cost
+            step = self._line_search_method.alpha * delta
+            point_to_evaluate = x + step            
+            point_phi, point_J = self._evaluate(point_to_evaluate)
+            point_cost = self._cost_total(point_phi)
+            
+             # and not self._stop(desired_cost_decrease)
+            while point_cost > desired_cost:
+                # honestly, alpha multiplication is just here so it will be numerically stable
+                # otherwise just multiply below values with stepwise decrement.
+                self._line_search_method.alpha = self._line_search_method.alpha * self._stepsize_decrement
+                # Evaluate desired cost
+                desired_cost_decrease = self._line_search_method.alpha * desired_cost_decrease_multiplier
+                desired_cost = cost + desired_cost_decrease
+
+                # Evaluate point cost
+                step = self._line_search_method.alpha * delta
+                point_to_evaluate = x + step            
+                point_phi, point_J = self._evaluate(point_to_evaluate)
+                point_cost = self._cost_total(point_phi)
+                # I am just gonna ignore the alpha optimization, why is it in my mind
+                # even though it just get rids of one multiplication and putting one addition
+                # in place.
+                
+            x = x + step
+            self._line_search_method.alpha = min(self._step_increase * self._line_search_method.alpha, np.inf)
+
+        delta_x = x - x_start
+        delta_x_norm = np.linalg.norm(delta_x)
+        
+        return solved, x, point_phi, point_J, cost - point_cost
     
+    # def _method_wrapper(self, x_current, method):
+        # x_next = None
+        # match method.name:
+            # case self._gradient_descent_string:
+                # for _ in range(method.iteration_amount):
+                    # phi, jacobian = self._evaluate(x_current)
+                    # cost_new = self._cost_total(phi)
+                    # gradient_new = self._gradient_total(phi, jacobian)
+                    # x_next, expected_cost_change = self._gradient_descent(x_current, gradient_new)
+    
+    # def _all_methods_tried(self):
+        # methods_tried_booleans = self._method_tried.values()
+        
+        # if np.all(methods_tried_booleans):
+            # return True
+        # else:
+            # return False
+    
+    # def _reset_method_usage(self):
+        # for method in self._methods_list:
+            # self._methods_tried[method] = False
+    
+    """
+    Much better structure is needed. This comes as weird.
+    """
     def solve(self):
         """
 
@@ -139,99 +304,91 @@ class SolverUnconstrained(NLPSolver):
 
         """
         # write your code here
-        warnings.filterwarnings('error')            
-        # use the following to get an initialization:
-        x_init = self.problem.getInitializationSample()
-        x_init = np.array(x_init, dtype=np.float64)
+        warnings.filterwarnings('error')   
+
+
         # get feature types
-        # ot[i] indicates the type of feature i (either OT.f or OT.sos)
-        # there is at most one feature of type OT.f
-        ot = self.problem.getFeatureTypes()
-
-        # print(str(x) + " " + str(self._evaluate_cost_jacobian(x)))
-        print("Features: " + str(ot))
+        assert(self.problem != None)
+        self._featureTypes = self.FeatureTypes(self.problem)
         
-        # now code some loop that iteratively queries the problem and updates x till convergence        
-        self._iteration_total
-        
-        if 2 not in ot:
-            evaluate_cost = self._evaluate_cost
-            evaluate_cost_jacobian = self._evaluate_cost_jacobian
-            it_trys = 3
-            it_per_try = int(self._iteration_total / it_trys)
-            
-            methods = [self._gradient_descent]
-            methods_param_total = [1]
-            solved = False
-            
-            x, solved = self._try_solution(x_init, it_per_try, methods, methods_param_total, evaluate_cost, evaluate_cost_jacobian, False)
-            
-            if solved == True:
-                print("Gradient descent: Solved")
-                # show_data.cost_over_time(self.problem)
-                return x
-            else:
-                show_data.cost_over_time(self.problem)
-            
-            methods = [self._newtons_method]
-            methods_param_total = [1]
-
-            x, solved = self._try_solution(x_init, it_per_try, methods, methods_param_total, evaluate_cost, evaluate_cost_jacobian, False)
-            
-            if solved == True:
-                print("Newtons method: Solved")
-                # show_data.cost_over_time(self.problem)
-                return x
-            else:
-                show_data.cost_over_time(self.problem)
-            
-            methods = [self._line_search]
-            methods_param_total = [3]
-
-            x, solved = self._try_solution(x_init, it_per_try, methods, methods_param_total, evaluate_cost, evaluate_cost_jacobian, False)
-
-            if solved == True:
-                print("Line Search: Solved")
-                show_data.cost_over_time(self.problem)
-                return x
-            else:
-                show_data.cost_over_time(self.problem)
-            
-            # show_data.cost_over_time(self.problem)
-            # show_data.gradient_over_time(self.problem)
-            
-            return x
-        
+        if len(self._featureTypes.sos_index) == 0:
+            hessian_method = self._hessian
         else:
-            evaluate_cost = self._evaluate_cost_sos_total
-            evaluate_cost_jacobian = self._evaluate_cost_jacobian_sos
-            it_trys = 2
-            it_per_try = int(self._iteration_total / it_trys)
+            hessian_method = self._hessian_sos_2
+        
+        x_init = self.problem.getInitializationSample()
+        
+        # Prevent access with None
+        x_current = x_init
+        x_new = None
+        
+        cost_current = np.inf
+        cost_new = None
+                
+        # Start for loop
+        max_last_change = np.inf
+        
+        it = 0
+        
+        while not self._stop(max_last_change):
+            list_expected_cost_change = [m.last_cost_change for m in self._method_list]
+            method_with_max_change_index = np.argmax(list_expected_cost_change)
+            method_with_max_change = self._method_list[method_with_max_change_index]
             
-            methods = [self._sos_gradient]
-            methods_param_total = [1]
-            solved = False
+            if method_with_max_change.name == self._gradient_descent_string:
+                current_it = 0
+                phi_current, jacobian_current = self._evaluate(x_current)
+                cost_current, gradient_current = self._cost_gradient_total(phi_current, jacobian_current)
+                while current_it < method_with_max_change.iteration_amount:
+                    current_it += 1
+                    x_new, expected_cost_change = self._gradient_descent(x_current, gradient_current)
+                    phi_new, jacobian_new = self._evaluate(x_new)
+                    cost_new, gradient_new = self._cost_gradient_total(phi_new, jacobian_new)
+                    cost_diff = cost_current - cost_new
+                    if self._reject_step(expected_cost_change, cost_diff):
+                        method_with_max_change.lower_alpha(self._lower_alpha_multiplier)
+                        method_with_max_change.last_cost_change *= self._lower_alpha_multiplier
+                    else:
+                        method_with_max_change.last_cost_change = cost_diff
+                        x_current = x_new
+                        cost_current = cost_new
+                        gradient_current = gradient_new
             
-            x, solved = self._try_solution(x_init, it_per_try, methods, methods_param_total, evaluate_cost, evaluate_cost_jacobian, True)
+            elif method_with_max_change.name == self._newtons_method_string:
+                current_it = 0
+                phi_current, jacobian_current = self._evaluate(x_current)
+                cost_current, gradient_current = self._cost_gradient_total(phi_current, jacobian_current)
+                hessian_current = hessian_method(x_current, jacobian_current)
+                while current_it < method_with_max_change.iteration_amount:
+                    current_it += 1
+                    x_new, expected_cost_change = self._newtons_method(x_current, gradient_current, hessian_current)
+                    phi_new, jacobian_new = self._evaluate(x_new)
+                    cost_new, gradient_new = self._cost_gradient_total(phi_new, jacobian_new)
+                    cost_diff = cost_current - cost_new
+                    if self._reject_step(expected_cost_change, cost_diff):
+                        method_with_max_change.lower_alpha(self._lower_alpha_multiplier)
+                        method_with_max_change.last_cost_change *= self._lower_alpha_multiplier
+                    else:
+                        method_with_max_change.last_cost_change = cost_diff
+                        x_current = x_new
+                        cost_current = cost_new
+                        gradient_current = gradient_new
+                        hessian_current = hessian_method(x_new, jacobian_current)
             
-            if solved == True:
-                print("Gradient descent: Solved")
-                show_data.cost_over_time_sos(self.problem)
-                return x
-            else:
-                show_data.cost_over_time_sos(self.problem)
+            elif method_with_max_change.name ==  self._line_search_string:
+                it += 1
+                current_it = 0
+                while current_it < method_with_max_change.iteration_amount:
+                    current_it += 1
+                    solved, x_current, point_phi, point_J, cost_diff = self._line_search_normalized(x_current)
+                    method_with_max_change.last_cost_change = cost_diff
             
             
-            methods = [self._line_search]
-            methods_param_total = [3]
+            max_last_change = np.max([m.last_cost_change for m in self._method_list])
+        
+        # show_data.cost_over_time_sos(self.problem)
+        # show_data.gradient_over_time(self.problem)
+        
+        phi, jacobian = self._evaluate(x_current)
 
-            x, solved = self._try_solution(x_init, it_per_try, methods, methods_param_total, evaluate_cost, evaluate_cost_jacobian, True)
-
-            if solved == True:
-                print("Line Search: Solved")
-                show_data.cost_over_time_sos(self.problem)
-                return x
-            else:
-                show_data.cost_over_time_sos(self.problem)
-            
-            return x
+        return x_current
