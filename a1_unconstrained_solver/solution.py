@@ -20,11 +20,40 @@ class SolverUnconstrained(NLPSolver):
         self._step_increase = 1.2
         self._stepsize_decrement = 0.5
         self._minimum_desired_decrease = 0.01
-        # in case you want to initialize some class members or so...
-        self._maximum_cost = 1e-7
+        self._maximum_cost = 1e-3
         
-    # Descent methods
+        self._iteration_total = 10000
+
+    # Utility functions
+
+    def _evaluate_cost(self, x):
+        cost, _ = self.problem.evaluate(x)
+        
+        return cost[0]
     
+    def _get_sos_cost(self, phi):
+        return np.dot(phi, phi)
+    
+    def _evaluate_cost_sos_total(self, x):
+        cost, _ = self.problem.evaluate(x)
+        cost = self._get_sos_cost(phi)
+
+        return cost
+
+    def _evaluate_cost_jacobian(self, x):
+        cost, jacobian = self.problem.evaluate(x)
+    
+        return cost[0], jacobian[0]
+        
+    def _evaluate_cost_jacobian_sos(self, x):
+        cost, jacobian = self.problem.evaluate(x)
+        cost_summed = np.dot(cost, cost)
+        sos_gradient = jacobian.T @ cost
+    
+        return cost_summed, sos_gradient
+
+    # Optimization functions
+
     def _gradient_descent(self, x):
         phi, J = self._evaluate_cost_jacobian(x)
         
@@ -33,45 +62,17 @@ class SolverUnconstrained(NLPSolver):
     def _sos_gradient(self, x):
     
         phi, J = self.problem.evaluate(x)
-        
-        # print(np.sum(phi, axis=0))
-        # input()
 
         return x - 0.01 * J.T @ phi, [phi, J]
 
     def _newtons_method(self, x):
         phi, J = self._evaluate_cost_jacobian(x)
         
-        H = self.problem.getFHessian(x)  # if necessary
+        H = self.problem.getFHessian(x)
         delta = np.linalg.inv(H) @ J
         return x - delta, [phi, J, H]
 
-    def _evaluate_cost(self, x):
-        cost, _ = self.problem.evaluate(x)
-        
-        return cost[0]
-    
-    def _evaluate_cost_sos_total(self, x):
-        cost, _ = self.problem.evaluate(x)
-        cost = np.dot(cost, cost)
 
-        return cost
-    
-    def _evaluate_cost_jacobian(self, x):
-        cost, jacobian = self.problem.evaluate(x)
-    
-        return cost[0], jacobian[0]
-    
-    def _evaluate_cost_jacobian_sos(self, x):
-        cost, jacobian = self.problem.evaluate(x)
-        cost_summed = np.dot(cost, cost)
-        sos_gradient = jacobian.T @ cost
-    
-        return cost_summed, sos_gradient
-    
-    def _get_sos_cost(self, phi):
-        return np.dot(phi, phi)
-    
     def _line_search(self, x, evaluate_cost, evaluate_cost_jacobian):        
         alpha = 1
         
@@ -101,11 +102,6 @@ class SolverUnconstrained(NLPSolver):
             jacobian_norm = np.linalg.norm(jacobian)
             
         return x, [phi, jacobian]
-    
-    # Write line search for NonLinearSOS
-    
-    def _identity(self, **args):
-        return x
 
     def _try_solution(self, x_init, it_per_try, methods, methods_param_total, evaluate_cost, evaluate_cost_jacobian, is_sos):
         x = x_init
@@ -153,17 +149,16 @@ class SolverUnconstrained(NLPSolver):
         ot = self.problem.getFeatureTypes()
 
         # print(str(x) + " " + str(self._evaluate_cost_jacobian(x)))
-        print(ot)
+        print("Features: " + str(ot))
         
         # now code some loop that iteratively queries the problem and updates x till convergence        
-        it_amount = 1000
+        self._iteration_total
         
         if 2 not in ot:
             evaluate_cost = self._evaluate_cost
             evaluate_cost_jacobian = self._evaluate_cost_jacobian
-            it_amount = 1000
             it_trys = 3
-            it_per_try = int(it_amount / it_trys)
+            it_per_try = int(self._iteration_total / it_trys)
             
             methods = [self._gradient_descent]
             methods_param_total = [1]
@@ -173,8 +168,10 @@ class SolverUnconstrained(NLPSolver):
             
             if solved == True:
                 print("Gradient descent: Solved")
-                show_data.cost_over_time(self.problem)
+                # show_data.cost_over_time(self.problem)
                 return x
+            else:
+                show_data.cost_over_time(self.problem)
             
             methods = [self._newtons_method]
             methods_param_total = [1]
@@ -183,8 +180,10 @@ class SolverUnconstrained(NLPSolver):
             
             if solved == True:
                 print("Newtons method: Solved")
-                show_data.cost_over_time(self.problem)
+                # show_data.cost_over_time(self.problem)
                 return x
+            else:
+                show_data.cost_over_time(self.problem)
             
             methods = [self._line_search]
             methods_param_total = [3]
@@ -195,8 +194,10 @@ class SolverUnconstrained(NLPSolver):
                 print("Line Search: Solved")
                 show_data.cost_over_time(self.problem)
                 return x
-
-            show_data.cost_over_time(self.problem)
+            else:
+                show_data.cost_over_time(self.problem)
+            
+            # show_data.cost_over_time(self.problem)
             # show_data.gradient_over_time(self.problem)
             
             return x
@@ -204,9 +205,8 @@ class SolverUnconstrained(NLPSolver):
         else:
             evaluate_cost = self._evaluate_cost_sos_total
             evaluate_cost_jacobian = self._evaluate_cost_jacobian_sos
-            it_amount = 1000
-            it_trys = 1
-            it_per_try = int(it_amount / it_trys)
+            it_trys = 2
+            it_per_try = int(self._iteration_total / it_trys)
             
             methods = [self._sos_gradient]
             methods_param_total = [1]
@@ -218,20 +218,20 @@ class SolverUnconstrained(NLPSolver):
                 print("Gradient descent: Solved")
                 show_data.cost_over_time_sos(self.problem)
                 return x
+            else:
+                show_data.cost_over_time_sos(self.problem)
             
-            show_data.cost_over_time_sos(self.problem)
             
             methods = [self._line_search]
             methods_param_total = [3]
 
-            # x, solved = self._try_solution(x_init, it_per_try, methods, methods_param_total, evaluate_cost, evaluate_cost_jacobian, True)
+            x, solved = self._try_solution(x_init, it_per_try, methods, methods_param_total, evaluate_cost, evaluate_cost_jacobian, True)
 
-            # if solved == True:
-                # print("Line Search: Solved")
-                # show_data.cost_over_time_sos(self.problem)
-                # return x
-            
-            # show_data.cost_over_time_sos(self.problem)
-            # show_data.gradient_over_time(self.problem)
+            if solved == True:
+                print("Line Search: Solved")
+                show_data.cost_over_time_sos(self.problem)
+                return x
+            else:
+                show_data.cost_over_time_sos(self.problem)
             
             return x
