@@ -78,7 +78,7 @@ class SolverAugmentedLagrangian(NLPSolver):
             
         def equality_cost_total(self, equality_cost):
             square_cost = self._eq_square_cost_multiplier * np.dot(equality_cost, equality_cost)
-            lagrangian_cost = np.dot(_equality_lagrangians, equality_cost)
+            lagrangian_cost = np.dot(self._equality_lagrangians, equality_cost)
             
             cost = square_cost + lagrangian_cost
             

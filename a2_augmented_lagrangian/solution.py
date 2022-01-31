@@ -5,7 +5,7 @@ import warnings
 sys.path.append("..")
 from optimization_algorithms.interface.nlp_solver import NLPSolver
 from optimization_algorithms.interface.objective_type import OT
-from utility import show_data 
+# from utility import show_data 
 from optimization_algorithms.utils import finite_diff
 
 class SolverAugmentedLagrangian(NLPSolver):
@@ -495,7 +495,7 @@ class SolverAugmentedLagrangian(NLPSolver):
             self._augmented_lagrangian.update(phi_current[self._featureTypes.ineq_index], phi_current[self._featureTypes.eq_index])
             max_last_change = np.inf
         
-        show_data.cost_over_time(self.problem)
+        # show_data.cost_over_time(self.problem)
         # show_data.gradient_over_time(self.problem)
         
         phi, jacobian = self._evaluate(x_current)
