@@ -5,7 +5,7 @@ import warnings
 sys.path.append("..")
 from optimization_algorithms.interface.nlp_solver import NLPSolver
 from optimization_algorithms.interface.objective_type import OT
-from utility import show_data 
+# from utility import show_data 
 from optimization_algorithms.utils import finite_diff
 
 class SolverInteriorPoint(NLPSolver):
@@ -414,7 +414,7 @@ class SolverInteriorPoint(NLPSolver):
             self._evaluate(x_current)
             return x_current
         
-        show_data.cost_over_time(self.problem)
+        # show_data.cost_over_time(self.problem)
         # show_data.x_over_time(self.problem)
         # show_data.gradient_over_time(self.problem)
         # print(self._iteration_current)

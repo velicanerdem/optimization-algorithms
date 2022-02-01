@@ -411,13 +411,13 @@ class SolverInteriorPoint(NLPSolver):
                 x_change = np.sum(np.abs(x_change))
         except:
             show_data.cost_over_time(self.problem)
-            self._evaluate(x_current)
-            return x_current
+            self._evaluate(x_current_iteration)
+            return x_current_iteration
         
         # show_data.cost_over_time(self.problem)
         # show_data.x_over_time(self.problem)
         # show_data.gradient_over_time(self.problem)
         # print(self._iteration_current)
-        phi, jacobian = self._evaluate(x_current)
+        phi, jacobian = self._evaluate(x_current_iteration)
         # print(x_current)
-        return x_current
+        return x_current_iteration
