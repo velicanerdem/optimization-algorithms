@@ -5,7 +5,7 @@ import warnings
 sys.path.append("..")
 from optimization_algorithms.interface.nlp_solver import NLPSolver
 from optimization_algorithms.interface.objective_type import OT
-# from utility import show_data 
+from utility import show_data 
 from optimization_algorithms.utils import finite_diff
 
 class SolverInteriorPoint(NLPSolver):
@@ -28,7 +28,7 @@ class SolverInteriorPoint(NLPSolver):
         def __init__(self, featureTypes, update_cost_multipliers=False):
             self._log_multiplier = 1.
             self._log_multiplier_decrease_mult = 0.5
-            self.epsilon = 1e-24
+            self.epsilon = 1e-32
         
         def update(self):
             self._log_multiplier *= self._log_multiplier_decrease_mult
@@ -45,9 +45,11 @@ class SolverInteriorPoint(NLPSolver):
         def cost_total(self, inequality_cost):
             if np.any(inequality_cost >= 0):
                 return np.inf
+            
             log_cost = np.log(-inequality_cost)
             log_cost_summed = np.sum(log_cost)
             cost = -self._log_multiplier * log_cost_summed
+            
             return cost
             
         def gradient_total(self, inequality_cost, inequality_gradient):
@@ -100,11 +102,11 @@ class SolverInteriorPoint(NLPSolver):
         self._minimum_desired_decrease_multiplier = 0.01
         
         self._iteration_current = 0
-        self._iteration_total = 10000
+        self._iteration_total = 100000
         
-        self._stop_value = 1e-3 / self._iteration_total
+        self._stop_value = 1e-6
         
-        self._line_search_forward_pass = 1
+        self._line_search_forward_pass = 10
         
         self._method_multiplier = 0.25
         
@@ -123,22 +125,7 @@ class SolverInteriorPoint(NLPSolver):
     def _assign_max_alpha(self):
         self._alpha = max(self._alpha_gradient_descent, self._alpha_newtons_method, self._alpha_line_search)
 
-    # Correct with convex assumption
-    def _stop(self, max_last_change):
-        it_remaining = self._iteration_total - self._iteration_current
-        maximum_expected_change = max_last_change * it_remaining
 
-        if self._stop_value > maximum_expected_change:
-            return True
-        else:
-            return False
-
-    # I wonder if I can add more
-    def _reject_step(self, expected_cost_change, cost_diff):
-        if cost_diff <= 0:
-            return True
-        else:
-            return False
 
     # Utility functions
     
@@ -165,6 +152,8 @@ class SolverInteriorPoint(NLPSolver):
     def _hessian_sos_2(self, x, J):
         return 2 * J.T @ J
 
+    # take care if one of these is deprecated
+
     def _cost_total(self, phi):
         cost = 0
         f_index = self._featureTypes.f_index
@@ -178,7 +167,7 @@ class SolverInteriorPoint(NLPSolver):
             cost += phi[sos_index].T @ phi[sos_index]
         if len(ineq_index) > 0:
             cost += self._log_barrier.cost_total(phi[ineq_index])
-        # print(cost)
+
         return cost
 
     def _gradient_total(self, phi, J):        
@@ -219,35 +208,79 @@ class SolverInteriorPoint(NLPSolver):
         
         return cost, gradient
     
+    def _gradient_descent(self, x, phi, J):
+        descent_value_before_mult = np.zeros(self._featureTypes.x_shape)
+        
+        f_index = self._featureTypes.f_index
+        sos_index = self._featureTypes.sos_index
+        eq_index = self._featureTypes.eq_index
+        ineq_index = self._featureTypes.ineq_index
+        
+        if len(f_index) > 0:
+            descent_value_before_mult += J[f_index][0]
+        if len(sos_index) > 0:
+            descent_value_before_mult += J[sos_index].T @ phi[sos_index]
+        if len(ineq_index) > 0:
+            descent_value_before_mult += self._log_barrier.gradient_total(phi[ineq_index], J[ineq_index])
+    
+        descent = self._gradient_descent_method.alpha * descent_value_before_mult
+        
+        return descent, descent_value_before_mult
+    
+    def _newtons_method(self, x, phi, J):
+        descent_value_before_mult = np.zeros(self._featureTypes.x_shape)
+        
+        f_index = self._featureTypes.f_index
+        sos_index = self._featureTypes.sos_index
+        eq_index = self._featureTypes.eq_index
+        ineq_index = self._featureTypes.ineq_index
+        
+        if len(f_index) > 0:
+            gradient = J[f_index][0]
+            f_hessian = self._hessian(x, None)
+            descent_value_before_mult += np.linalg.inv(f_hessian) @ gradient
+        if len(sos_index) > 0:
+            J_sos = J[sos_index]
+            J_sos_transpose = J_sos.T
+            gradient = J_sos_transpose @ phi[sos_index]
+            sos_hessian = 2 * J_sos_transpose @ J_sos
+            descent_value_before_mult += np.linalg.inv(sos_hessian) @ gradient
+        if len(ineq_index) > 0:
+            # no hessian
+            descent_value_before_mult += self._log_barrier.gradient_total(phi[ineq_index], J[ineq_index])
+    
+        descent = self._newtons_method_method.alpha * descent_value_before_mult
+        
+        return descent, descent_value_before_mult
+    
+        # Correct with convex assumption
+    def _stop(self, expected_cost_change, it_current, it_total):
+        it_remaining = it_total - it_current
+        maximum_expected_change = expected_cost_change * it_remaining
+
+        if self._stop_value > maximum_expected_change:
+            return True
+        else:
+            return False
+    
     def _stop_log_barrier(self, x_last_change):
-        # print(x_last_change)
+        if self._iteration_current > self._iteration_total:
+            return True
+        
         if self._log_barrier.epsilon > x_last_change:
-            pass
-            # return True
+            return True
         if self._iteration_current >= self._iteration_total:
             return True
         return False
     
-    # Optimization functions
-
-    def _gradient_descent(self, x, gradient):
-        descent = self._gradient_descent_method.alpha * gradient
+    # I wonder if I can add more
+    def _reject_step(self, cost_current, cost_new):
+        # cost_diff = cost_current - cost_new
+        if cost_current == np.inf:
+            return True
+        else:
+            return False
         
-        delta = descent * gradient
-        expected_cost_change = np.sum(np.abs(delta))
-        
-        return x - descent, expected_cost_change
-
-    def _newtons_method(self, x, gradient, hessian):        
-        gradient_val = np.linalg.pinv(hessian) @ gradient
-        descent = self._newtons_method_method.alpha * gradient_val
-        
-        delta = descent * gradient_val
-        expected_cost_change = np.sum(np.abs(delta))
-        
-        return x - descent, expected_cost_change
-        
-
     # Normalized because it uses normalized jacobian for stepwise movement instead of unit.
     # Only optimization function with evaluate inside, but nothing much to do about it
     # Thus it returns phi / jacobian
@@ -276,10 +309,11 @@ class SolverInteriorPoint(NLPSolver):
             # I will just do it before loop first
 
             # Evaluate desired cost
+            # jacobian * delta = -jacobian_norm
             desired_cost_decrease_multiplier = self._minimum_desired_decrease_multiplier * -jacobian_norm
             desired_cost_decrease = self._line_search_method.alpha * desired_cost_decrease_multiplier
             desired_cost = cost + desired_cost_decrease
-
+            print("D: {}".format(desired_cost_decrease))
             # Evaluate point cost
             step = self._line_search_method.alpha * delta
             point_to_evaluate = x + step            
@@ -303,12 +337,9 @@ class SolverInteriorPoint(NLPSolver):
                 # I am just gonna ignore the alpha optimization, why is it in my mind
                 # even though it just get rids of one multiplication and putting one addition
                 # in place.
-                
+                print(point_cost - desired_cost)
             x = x + step
             self._line_search_method.alpha = min(self._step_increase * self._line_search_method.alpha, np.inf)
-
-        delta_x = x - x_start
-        delta_x_norm = np.linalg.norm(delta_x)
         
         return solved, x, point_phi, point_J, cost - point_cost
     
@@ -365,6 +396,7 @@ class SolverInteriorPoint(NLPSolver):
         
         # Prevent access with None
         x_current = x_init
+        x_current_iteration = x_init
         x_new = None
         
         cost_current = np.inf
@@ -373,51 +405,74 @@ class SolverInteriorPoint(NLPSolver):
         # Start for loop
         # not the best can change
         x_change = np.inf
-        max_last_change = np.inf
+        expected_cost_change = np.inf
 
         """
         Take care in case of failure of changing values since whatever the values are used they will be invalid
         """
-        try:
-            while not self._stop_log_barrier(x_change):
-                max_last_change = np.inf
-                x_current_iteration = x_current
-                while not self._stop(max_last_change):
-                    list_expected_cost_change = [m.last_cost_change for m in self._method_list]
-                    method_with_max_change_index = np.argmax(list_expected_cost_change)
-                    method_with_max_change = self._method_list[method_with_max_change_index]
-
-                    phi_current, jacobian_current = self._evaluate(x_current)
-                    cost_current, gradient_current = self._cost_gradient_total(phi_current, jacobian_current)
-                    x_new, expected_cost_change = self._gradient_descent(x_current, gradient_current)
-                    phi_new, jacobian_new = self._evaluate(x_new)
-                    cost_new, gradient_new = self._cost_gradient_total(phi_new, jacobian_new)
-                    cost_diff = cost_current - cost_new
-                    if self._reject_step(expected_cost_change, cost_diff):
-                        method_with_max_change.lower_alpha(self._lower_alpha_multiplier)
-                        method_with_max_change.last_cost_change *= self._lower_alpha_multiplier
-                    else:
-                        # print(self._log_barrier._log_multiplier)
-                        method_with_max_change.alpha = self._alpha_init
-                        method_with_max_change.last_cost_change = cost_diff
-                        x_current = x_new
-                        cost_current = cost_new
-                        gradient_current = gradient_new
-                    
-                    max_last_change = np.max([m.last_cost_change for m in self._method_list])
+        # Change when its accepted.
+        phi_current, jacobian_current = self._evaluate(x_current)
+        cost_current = self._cost_total(phi_current)
+        descent, descent_value_before_mult = self._gradient_descent(x_current, phi_current, jacobian_current)
+        # method_with_max_change = self._gradient_descent_method
+        inside_it_total = 5000
+        # try:
+        while not self._stop_log_barrier(x_change):
+            inside_it = 0
+            while not self._stop(expected_cost_change, inside_it, inside_it_total):
+                inside_it += 1
+                x_new = x_current - descent
+                phi_new, jacobian_new = self._evaluate(x_new)
                 
-                self._log_barrier.update()
-                x_change = x_current - x_current_iteration
-                x_change = np.sum(np.abs(x_change))
-        except:
-            show_data.cost_over_time(self.problem)
-            self._evaluate(x_current_iteration)
-            return x_current_iteration
+                cost_new = self._cost_total(phi_new)
+                if cost_new == np.inf:
+                    descent *= self._lower_alpha_multiplier
+                    expected_cost_change *= self._lower_alpha_multiplier
+                # Assign success values
+                else:
+                    x_current = x_new
+                    phi_current = phi_new
+                    jacobian_current = jacobian_new
+                    cost_current = cost_new
+                    descent, descent_value_before_mult = self._gradient_descent(x_current, phi_current, jacobian_current)
+                    expected_cost_change = np.linalg.norm(descent * descent_value_before_mult)
+            
+            x_change = x_current - x_current_iteration
+            x_change = np.linalg.norm(x_change)
+            x_current_iteration = x_current
+            
+            self._log_barrier.update()
+        # except:
+            # show_data.cost_over_time(self.problem)
+            # self._evaluate(x_current_iteration)
+            # return x_current_iteration
         
-        # show_data.cost_over_time(self.problem)
+        # while not self._log_barrier.:
+            # inside_it = 0
+            # while not self._stop(expected_cost_change, inside_it, inside_it_total):
+                # inside_it += 1
+                # solved, x_new, phi_new, jacobian_new, expected_cost_change = self._line_search_normalized(x_current)
+                # print(expected_cost_change)
+                # self._line_search_method.alpha = self._alpha_init
+                # cost_new = self._cost_total(phi_new)
+                # print(expected_cost_change)
+                # Assign success values
+                # x_current = x_new
+                # phi_current = phi_new
+                # jacobian_current = jacobian_new
+                # cost_current = cost_new
+
+            # x_change = x_current - x_current_iteration
+            # x_change = np.linalg.norm(x_change)
+            # x_current_iteration = x_current
+            
+            # self._log_barrier.update()
+            
+        show_data.cost_over_time(self.problem)
+        #   show_data.cost_over_time_unviolated(self.problem, self._featureTypes)
         # show_data.x_over_time(self.problem)
         # show_data.gradient_over_time(self.problem)
-        # print(self._iteration_current)
+
         phi, jacobian = self._evaluate(x_current_iteration)
-        # print(x_current)
+        print(x_current_iteration)
         return x_current_iteration
