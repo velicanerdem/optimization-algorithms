@@ -310,7 +310,6 @@ class SolverAugmentedLagrangian(NLPSolver):
         
         return x - descent, expected_cost_change
         
-
     # Normalized because it uses normalized jacobian for stepwise movement instead of unit.
     # Only optimization function with evaluate inside, but nothing much to do about it
     # Thus it returns phi / jacobian

@@ -244,7 +244,7 @@ class SolverInteriorPoint(NLPSolver):
             J_sos_transpose = J_sos.T
             gradient = J_sos_transpose @ phi[sos_index]
             sos_hessian = 2 * J_sos_transpose @ J_sos
-            descent_value_before_mult += np.linalg.inv(sos_hessian) @ gradient
+            descent_value_before_mult += np.linalg.solve(sos_hessian, gradient)
         if len(ineq_index) > 0:
             # no hessian
             descent_value_before_mult += self._log_barrier.gradient_total(phi[ineq_index], J[ineq_index])
@@ -252,34 +252,6 @@ class SolverInteriorPoint(NLPSolver):
         descent = self._newtons_method_method.alpha * descent_value_before_mult
         
         return descent, descent_value_before_mult
-    
-        # Correct with convex assumption
-    def _stop(self, expected_cost_change, it_current, it_total):
-        it_remaining = it_total - it_current
-        maximum_expected_change = expected_cost_change * it_remaining
-
-        if self._stop_value > maximum_expected_change:
-            return True
-        else:
-            return False
-    
-    def _stop_log_barrier(self, x_last_change):
-        if self._iteration_current > self._iteration_total:
-            return True
-        
-        if self._log_barrier.epsilon > x_last_change:
-            return True
-        if self._iteration_current >= self._iteration_total:
-            return True
-        return False
-    
-    # I wonder if I can add more
-    def _reject_step(self, cost_current, cost_new):
-        # cost_diff = cost_current - cost_new
-        if cost_current == np.inf:
-            return True
-        else:
-            return False
         
     # Normalized because it uses normalized jacobian for stepwise movement instead of unit.
     # Only optimization function with evaluate inside, but nothing much to do about it
@@ -365,6 +337,32 @@ class SolverInteriorPoint(NLPSolver):
         # for _Method in self._methods_list:
             # self._methods_tried[_Method] = False
     
+    def _stop(self, expected_cost_change, it_current, it_total):
+        it_remaining = it_total - it_current
+        maximum_expected_change = expected_cost_change * it_remaining
+
+        if self._stop_value > maximum_expected_change:
+            return True
+        else:
+            return False
+    
+    def _stop_log_barrier(self, x_last_change):
+        if self._iteration_current > self._iteration_total:
+            return True
+        
+        if self._log_barrier.epsilon > x_last_change:
+            return True
+        if self._iteration_current >= self._iteration_total:
+            return True
+        return False
+    
+    # I wonder if I can add more
+    def _reject_step(self, cost_current, cost_new):
+        # cost_diff = cost_current - cost_new
+        if cost_current == np.inf:
+            return True
+        else:
+            return False
     """
     Much better structure is needed. This comes as weird.
     """
@@ -417,56 +415,56 @@ class SolverInteriorPoint(NLPSolver):
         # method_with_max_change = self._gradient_descent_method
         inside_it_total = 5000
         # try:
-        while not self._stop_log_barrier(x_change):
-            inside_it = 0
-            while not self._stop(expected_cost_change, inside_it, inside_it_total):
-                inside_it += 1
-                x_new = x_current - descent
-                phi_new, jacobian_new = self._evaluate(x_new)
-                
-                cost_new = self._cost_total(phi_new)
-                if cost_new == np.inf:
-                    descent *= self._lower_alpha_multiplier
-                    expected_cost_change *= self._lower_alpha_multiplier
-                # Assign success values
-                else:
-                    x_current = x_new
-                    phi_current = phi_new
-                    jacobian_current = jacobian_new
-                    cost_current = cost_new
-                    descent, descent_value_before_mult = self._gradient_descent(x_current, phi_current, jacobian_current)
-                    expected_cost_change = np.linalg.norm(descent * descent_value_before_mult)
-            
-            x_change = x_current - x_current_iteration
-            x_change = np.linalg.norm(x_change)
-            x_current_iteration = x_current
-            
-            self._log_barrier.update()
-        except:
-            show_data.cost_over_time(self.problem)
-            self._evaluate(x_current_iteration)
-            return x_current_iteration
-        
-        # while not self._log_barrier.:
+        # while not self._stop_log_barrier(x_change):
             # inside_it = 0
             # while not self._stop(expected_cost_change, inside_it, inside_it_total):
                 # inside_it += 1
-                # solved, x_new, phi_new, jacobian_new, expected_cost_change = self._line_search_normalized(x_current)
-                # print(expected_cost_change)
-                # self._line_search_method.alpha = self._alpha_init
+                # x_new = x_current - descent
+                # phi_new, jacobian_new = self._evaluate(x_new)
+                
                 # cost_new = self._cost_total(phi_new)
-                # print(expected_cost_change)
-                # Assign success values
-                # x_current = x_new
-                # phi_current = phi_new
-                # jacobian_current = jacobian_new
-                # cost_current = cost_new
-
+                # if cost_new == np.inf:
+                    # descent *= self._lower_alpha_multiplier
+                    # expected_cost_change *= self._lower_alpha_multiplier
+                # # Assign success values
+                # else:
+                    # x_current = x_new
+                    # phi_current = phi_new
+                    # jacobian_current = jacobian_new
+                    # cost_current = cost_new
+                    # descent, descent_value_before_mult = self._gradient_descent(x_current, phi_current, jacobian_current)
+                    # expected_cost_change = np.linalg.norm(descent * descent_value_before_mult)
+            
             # x_change = x_current - x_current_iteration
             # x_change = np.linalg.norm(x_change)
             # x_current_iteration = x_current
             
             # self._log_barrier.update()
+        # except:
+            # show_data.cost_over_time(self.problem)
+            # self._evaluate(x_current_iteration)
+            # return x_current_iteration
+        
+        while not self._log_barrier._log_multiplier < self._log_barrier.epsilon:
+            inside_it = 0
+            while not self._stop(expected_cost_change, inside_it, inside_it_total):
+                inside_it += 1
+                solved, x_new, phi_new, jacobian_new, expected_cost_change = self._line_search_normalized(x_current)
+
+                self._line_search_method.alpha = self._alpha_init
+                cost_new = self._cost_total(phi_new)
+
+                # Assign success values
+                x_current = x_new
+                phi_current = phi_new
+                jacobian_current = jacobian_new
+                cost_current = cost_new
+
+            x_change = x_current - x_current_iteration
+            x_change = np.linalg.norm(x_change)
+            x_current_iteration = x_current
+            
+            self._log_barrier.update()
             
         show_data.cost_over_time(self.problem)
         #   show_data.cost_over_time_unviolated(self.problem, self._featureTypes)

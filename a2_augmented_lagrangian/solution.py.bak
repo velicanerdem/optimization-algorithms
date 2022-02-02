@@ -5,7 +5,7 @@ import warnings
 sys.path.append("..")
 from optimization_algorithms.interface.nlp_solver import NLPSolver
 from optimization_algorithms.interface.objective_type import OT
-from utility import show_data 
+# from utility import show_data 
 from optimization_algorithms.utils import finite_diff
 
 class SolverAugmentedLagrangian(NLPSolver):
@@ -310,7 +310,6 @@ class SolverAugmentedLagrangian(NLPSolver):
         
         return x - descent, expected_cost_change
         
-
     # Normalized because it uses normalized jacobian for stepwise movement instead of unit.
     # Only optimization function with evaluate inside, but nothing much to do about it
     # Thus it returns phi / jacobian
@@ -441,7 +440,7 @@ class SolverAugmentedLagrangian(NLPSolver):
                 list_expected_cost_change = [m.last_cost_change for m in self._method_list]
                 method_with_max_change_index = np.argmax(list_expected_cost_change)
                 method_with_max_change = self._method_list[method_with_max_change_index]
-
+                method_with_max_change = self._newtons_method_method
                 if method_with_max_change.name == self._gradient_descent_string:
                     current_it = 0
                     phi_current, jacobian_current = self._evaluate(x_current)
@@ -495,7 +494,7 @@ class SolverAugmentedLagrangian(NLPSolver):
             self._augmented_lagrangian.update(phi_current[self._featureTypes.ineq_index], phi_current[self._featureTypes.eq_index])
             max_last_change = np.inf
         
-        show_data.cost_over_time(self.problem)
+        # show_data.cost_over_time(self.problem)
         # show_data.gradient_over_time(self.problem)
         
         phi, jacobian = self._evaluate(x_current)

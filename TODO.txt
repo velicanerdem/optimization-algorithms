@@ -1,2 +1,1 @@
-Streamline evaluate process:
-	
+Change newtons for solve

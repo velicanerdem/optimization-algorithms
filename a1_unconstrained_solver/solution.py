@@ -195,17 +195,16 @@ class SolverUnconstrained(NLPSolver):
         expected_cost_change = np.sum(np.abs(delta))
         
         return x - descent, expected_cost_change
-
+        
     def _newtons_method(self, x, gradient, hessian):        
-        gradient_val = np.linalg.inv(hessian) @ gradient
+        gradient_val = np.linalg.solve(hessian, gradient)
         descent = self._newtons_method_method.alpha * gradient_val
         
         delta = descent * gradient_val
         expected_cost_change = np.sum(np.abs(delta))
         
         return x - descent, expected_cost_change
-        
-
+    
     # Normalized because it uses normalized jacobian for stepwise movement instead of unit.
     # Only optimization function with evaluate inside, but nothing much to do about it
     # Thus it returns phi / jacobian
@@ -334,7 +333,7 @@ class SolverUnconstrained(NLPSolver):
             list_expected_cost_change = [m.last_cost_change for m in self._method_list]
             method_with_max_change_index = np.argmax(list_expected_cost_change)
             method_with_max_change = self._method_list[method_with_max_change_index]
-            
+
             if method_with_max_change.name == self._gradient_descent_string:
                 current_it = 0
                 phi_current, jacobian_current = self._evaluate(x_current)
